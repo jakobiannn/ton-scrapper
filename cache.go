@@ -1,19 +1,19 @@
 package main
 
 import (
-	sync "sync"
+	"sync"
 )
 
 type Cache interface {
 	put(key string, value string)
-	get(key string) string
+	get(key string) (string, bool)
 }
 
 type LRUCache struct {
 	elements     map[string]*Node
 	firstElement *Node
 	lastElement  *Node
-	lock         sync.RWMutex
+	lock         sync.Mutex // Mutex (не RWMutex) — put и get оба пишут (меняют порядок)
 	capacity     int
 }
 
@@ -24,47 +24,89 @@ type Node struct {
 	next  *Node
 }
 
+// put добавляет или обновляет элемент. При переполнении вытесняет LRU (последний).
 func (cache *LRUCache) put(key string, value string) {
 	cache.lock.Lock()
-	if len(cache.elements) >= cache.capacity && cache.elements[key] == nil {
-		cache.lastElement = cache.lastElement.prev
-		cache.lastElement.next = nil
-		delete(cache.elements, key)
+	defer cache.lock.Unlock()
+
+	// Если ключ уже есть — обновляем значение и перемещаем в начало
+	if node, exists := cache.elements[key]; exists {
+		node.value = value
+		cache.moveToFront(node)
+		return
 	}
-	var newNode = &Node{
+
+	// Вытесняем LRU если достигнут предел
+	if len(cache.elements) >= cache.capacity && cache.lastElement != nil {
+		evicted := cache.lastElement
+		cache.removeNode(evicted)
+		delete(cache.elements, evicted.key)
+	}
+
+	newNode := &Node{
 		key:   key,
 		value: value,
-		prev:  nil,
-		next:  cache.firstElement,
 	}
-
+	cache.addToFront(newNode)
 	cache.elements[key] = newNode
-	cache.firstElement = newNode
-	cache.lock.Unlock()
 }
 
-func (cache *LRUCache) get(key string) string {
-	if cache.elements[key] != nil {
-		cache.lock.Lock()
-		cache.moveToFront(cache.elements[key])
-		cache.lock.Unlock()
+// get возвращает значение и флаг found. Перемещает элемент в начало (MRU).
+func (cache *LRUCache) get(key string) (string, bool) {
+	cache.lock.Lock()
+	defer cache.lock.Unlock()
+
+	node, exists := cache.elements[key]
+	if !exists {
+		return "", false
 	}
-	return cache.elements[key].value
+
+	cache.moveToFront(node)
+	return node.value, true
 }
 
+// moveToFront — вызывается только под локом
 func (cache *LRUCache) moveToFront(node *Node) {
-	cache.remove(node)
+	if node == cache.firstElement {
+		return // уже в начале
+	}
+	cache.removeNode(node)
 	cache.addToFront(node)
 }
 
-func (cache *LRUCache) remove(node *Node) {
-	node.prev.next = node.next
-	node.next.prev = node.prev
+// removeNode — вырезает узел из двусвязного списка (под локом)
+func (cache *LRUCache) removeNode(node *Node) {
+	if node.prev != nil {
+		node.prev.next = node.next
+	} else {
+		cache.firstElement = node.next
+	}
+	if node.next != nil {
+		node.next.prev = node.prev
+	} else {
+		cache.lastElement = node.prev
+	}
+	node.prev = nil
+	node.next = nil
 }
 
+// addToFront — добавляет узел в голову списка (под локом)
 func (cache *LRUCache) addToFront(node *Node) {
-	cache.lock.Lock()
-	cache.firstElement.prev = node
+	node.prev = nil
 	node.next = cache.firstElement
+	if cache.firstElement != nil {
+		cache.firstElement.prev = node
+	}
 	cache.firstElement = node
+	if cache.lastElement == nil {
+		cache.lastElement = node
+	}
+}
+
+// NewLRUCache создаёт кэш с заданной ёмкостью
+func NewLRUCache(capacity int) *LRUCache {
+	return &LRUCache{
+		elements: make(map[string]*Node),
+		capacity: capacity,
+	}
 }

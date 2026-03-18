@@ -24,7 +24,7 @@ type TonCenterResponse struct {
 type MasterchainInfo struct {
 	Last struct {
 		Workchain int    `json:"workchain"`
-		Shard     string `json:"shard"` // Изменено на string
+		Shard     string `json:"shard"`
 		Seqno     int    `json:"seqno"`
 		RootHash  string `json:"root_hash"`
 		FileHash  string `json:"file_hash"`
@@ -32,7 +32,7 @@ type MasterchainInfo struct {
 }
 
 type BlockTransactions struct {
-	ID           []interface{} `json:"id"`
+	ID           interface{}   `json:"id"` // Может быть объектом или массивом
 	ReqCount     int           `json:"req_count"`
 	Incomplete   bool          `json:"incomplete"`
 	Transactions []ShortTxInfo `json:"transactions"`
@@ -102,11 +102,14 @@ func (c *TonCenterClient) doRequest(ctx context.Context, method string, params m
 
 	var response TonCenterResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal response: %w, body: %s", err, string(body))
 	}
 
 	if !response.Ok {
-		return nil, fmt.Errorf("API error: %s", response.Error)
+		if response.Error != "" {
+			return nil, fmt.Errorf("API error: %s", response.Error)
+		}
+		return nil, fmt.Errorf("API returned ok=false, body: %s", string(body))
 	}
 
 	return response.Result, nil
@@ -120,7 +123,7 @@ func (c *TonCenterClient) GetMasterchainInfo(ctx context.Context) (*MasterchainI
 
 	var info MasterchainInfo
 	if err := json.Unmarshal(result, &info); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal masterchain info: %w, data: %s", err, string(result))
 	}
 
 	return &info, nil
@@ -140,7 +143,7 @@ func (c *TonCenterClient) GetBlockTransactions(ctx context.Context, workchain in
 
 	var txs BlockTransactions
 	if err := json.Unmarshal(result, &txs); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal block transactions: %w, data: %s", err, string(result))
 	}
 
 	return &txs, nil
@@ -166,7 +169,7 @@ func (c *TonCenterClient) GetTransactions(ctx context.Context, address string, l
 
 	var txs []TransactionDetail
 	if err := json.Unmarshal(result, &txs); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal transactions: %w, data: %s", err, string(result))
 	}
 
 	return txs, nil

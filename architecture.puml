@@ -1,0 +1,41 @@
+@startuml
+!theme plain
+skinparam defaultFontName Calibri
+skinparam defaultFontSize 13
+skinparam rectangleBorderColor #1A2744
+skinparam rectangleBorderThickness 1.5
+skinparam rectangleFontStyle bold
+skinparam arrowColor #0D7377
+skinparam arrowThickness 1.5
+skinparam cardBorderThickness 1.5
+skinparam cardShadowing true
+
+rectangle "Модуль сбора данных" as L1 #EFF4FB {
+  card "TON Blockchain\n──────────\n~100k tx/день | блок ~5 сек" as TON #DBEAFE
+  card "Data Collector\n──────────\nGo + tonutils-go\nReal-time <1s | 5 workers" as DC #DBEAFE
+  TON -down-> DC
+}
+
+rectangle "Модуль потоковой обработки" as L2 #F0FDF4 {
+  card "Apache Kafka\n──────────\n5 topics | 7 дней retention" as KAFKA #DCFCE7
+  card "Feature Engineering\n──────────\nPython" as FE #DCFCE7
+  KAFKA -down-> FE
+}
+
+rectangle "Модуль хранения" as L3 #FFF7ED {
+  card "PostgreSQL + TimescaleDB\n──────────\nTime-series | ~10x compression\nAuto partitioning" as DB #FFEDD5
+}
+
+rectangle "Модуль анализа" as L4 #FDF2F8 {
+  card "Baseline\n──────────\nZ-score\nCUSUM" as BL #FCE7F3
+  card "ML Models\n──────────\nIsolation Forest\nAutoencoder" as ML #FCE7F3
+  card "Evaluation\n──────────\nPrecision / Recall / F1" as EV #FCE7F3
+  BL -down-> EV
+  ML -down-> EV
+}
+
+L1 -down-> L2 : raw blocks, transactions
+L2 -down-> L3 : features, metrics
+L3 -down-> L4 : historical dataset
+
+@enduml
