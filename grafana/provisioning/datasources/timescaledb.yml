@@ -1,14 +1,19 @@
 apiVersion: 1
 
+deleteDatasources:
+  - name: TimescaleDB
+    orgId: 1
+
 datasources:
   - name: TimescaleDB
-    type: postgres
+    type: grafana-postgresql-datasource
     url: timescaledb:5432
     database: ton_metrics
     user: ton
     secureJsonData:
       password: ton_secret
     jsonData:
+      database: ton_metrics
       sslmode: disable
       maxOpenConns: 10
       maxIdleConns: 5
