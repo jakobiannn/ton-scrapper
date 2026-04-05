@@ -10,7 +10,7 @@ import (
 
 	"ton-scrapper/collector"
 	"ton-scrapper/config"
-	"ton-scrapper/models"
+	"ton-scrapper/collector/models"
 )
 
 func main() {
@@ -98,6 +98,7 @@ func main() {
 	case "historical":
 		log.Println("Режим: Загрузка исторических данных")
 		loader := collector.NewHistoricalLoader(client, cfg.WorkerCount)
+		loader.SetCheckpointFile(cfg.CheckpointFile)
 
 		api := client.GetAPI()
 		current, err := api.CurrentMasterchainInfo(ctx)
@@ -105,12 +106,29 @@ func main() {
 			log.Fatalf("Не удалось получить текущий блок: %v", err)
 		}
 
-		// По умолчанию — последние 10 000 блоков (~14 часов)
-		startSeqno := current.SeqNo - 10_000
-		log.Printf("Загрузка блоков %d — %d", startSeqno, current.SeqNo)
+		// Определяем диапазон загрузки
+		var startSeqno, endSeqno uint32
+		if cfg.StartSeqNo > 0 {
+			startSeqno = cfg.StartSeqNo
+		} else {
+			startSeqno = current.SeqNo - cfg.HistoryDepth
+		}
+		if cfg.EndSeqNo > 0 {
+			endSeqno = cfg.EndSeqNo
+		} else {
+			endSeqno = current.SeqNo
+		}
+
+		// Checkpoint: возобновление с последней позиции
+		if cp, err := loader.LoadCheckpoint(); err == nil && cp > startSeqno {
+			log.Printf("Checkpoint найден: возобновление с блока %d (вместо %d)", cp+1, startSeqno)
+			startSeqno = cp + 1
+		}
+
+		log.Printf("Загрузка блоков %d — %d (%d блоков)", startSeqno, endSeqno, endSeqno-startSeqno+1)
 
 		go func() {
-			if err := loader.LoadHistoricalBlocks(ctx, startSeqno, current.SeqNo, metricsChan, cfg.Detailed); err != nil {
+			if err := loader.LoadHistoricalBlocks(ctx, startSeqno, endSeqno, metricsChan, cfg.Detailed); err != nil {
 				if ctx.Err() == nil {
 					log.Printf("Ошибка загрузки: %v", err)
 				}
@@ -122,6 +140,7 @@ func main() {
 	case "both":
 		log.Println("Режим: Исторические данные → Real-time (sequential)")
 		loader := collector.NewHistoricalLoader(client, cfg.WorkerCount)
+		loader.SetCheckpointFile(cfg.CheckpointFile)
 		processor := collector.NewTonStreamProcessor(client)
 
 		api := client.GetAPI()
@@ -130,7 +149,18 @@ func main() {
 			log.Fatalf("Не удалось получить текущий блок: %v", err)
 		}
 
-		startSeqno := current.SeqNo - 10_000
+		var startSeqno uint32
+		if cfg.StartSeqNo > 0 {
+			startSeqno = cfg.StartSeqNo
+		} else {
+			startSeqno = current.SeqNo - cfg.HistoryDepth
+		}
+
+		if cp, err := loader.LoadCheckpoint(); err == nil && cp > startSeqno {
+			log.Printf("Checkpoint: возобновление с блока %d", cp+1)
+			startSeqno = cp + 1
+		}
+
 		log.Printf("Шаг 1: историческая загрузка блоков %d — %d", startSeqno, current.SeqNo)
 
 		go func() {
@@ -151,8 +181,37 @@ func main() {
 			}
 		}()
 
+	case "toncenter":
+		log.Println("Режим: Загрузка исторических данных через TonCenter API")
+		loader := collector.NewTonCenterHistoricalLoader(cfg.TonCenterAPIKey, cfg.TonCenterRate)
+
+		var startSeqno, endSeqno uint32
+		if cfg.StartSeqNo > 0 {
+			startSeqno = cfg.StartSeqNo
+		} else {
+			log.Fatal("Для режима toncenter необходимо указать START_SEQNO")
+		}
+		if cfg.EndSeqNo > 0 {
+			endSeqno = cfg.EndSeqNo
+		} else {
+			log.Fatal("Для режима toncenter необходимо указать END_SEQNO")
+		}
+
+		log.Printf("TonCenter: загрузка блоков %d — %d (%d блоков, rate=%d req/sec)",
+			startSeqno, endSeqno, endSeqno-startSeqno+1, cfg.TonCenterRate)
+
+		go func() {
+			if err := loader.LoadBlocks(ctx, startSeqno, endSeqno, metricsChan); err != nil {
+				if ctx.Err() == nil {
+					log.Printf("Ошибка загрузки TonCenter: %v", err)
+				}
+			}
+			log.Println("TonCenter загрузка завершена")
+			cancel()
+		}()
+
 	default:
-		log.Fatalf("Неизвестный режим: %q (допустимые: realtime, historical, both)", cfg.Mode)
+		log.Fatalf("Неизвестный режим: %q (допустимые: realtime, historical, both, toncenter)", cfg.Mode)
 	}
 
 	// --- Ожидание сигнала остановки ---

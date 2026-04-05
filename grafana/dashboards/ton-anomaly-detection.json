@@ -1,0 +1,184 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "title": "Transactions Per Second (TPS)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT time_bucket('5 minutes', timestamp) AS time, AVG(tps) AS avg_tps, MAX(tps) AS max_tps FROM block_metrics WHERE $__timeFilter(timestamp) GROUP BY time ORDER BY time",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "title": "Transaction Count per Block",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT time_bucket('5 minutes', timestamp) AS time, AVG(transaction_count) AS avg_tx, MAX(transaction_count) AS max_tx FROM block_metrics WHERE $__timeFilter(timestamp) GROUP BY time ORDER BY time",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 1, "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "title": "Block Time (seconds)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT time_bucket('5 minutes', timestamp) AS time, AVG(block_time) AS avg_block_time, MAX(block_time) AS max_block_time FROM block_metrics WHERE $__timeFilter(timestamp) GROUP BY time ORDER BY time",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Unique Addresses per Block",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT time_bucket('5 minutes', timestamp) AS time, AVG(unique_addresses) AS avg_addrs, MAX(unique_addresses) AS max_addrs FROM block_metrics WHERE $__timeFilter(timestamp) GROUP BY time ORDER BY time",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 1, "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "title": "Gas Used (Total Fees)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT time_bucket('5 minutes', timestamp) AS time, AVG(total_gas_used) / 1e9 AS avg_gas_ton FROM block_metrics WHERE $__timeFilter(timestamp) GROUP BY time ORDER BY time",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "title": "External vs Internal Messages",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT time_bucket('5 minutes', timestamp) AS time, AVG(external_msg_count) AS external_msgs, AVG(internal_msg_count) AS internal_msgs FROM block_metrics WHERE $__timeFilter(timestamp) GROUP BY time ORDER BY time",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 1, "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "title": "Blocks Ingested (Total)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT COUNT(*) AS total_blocks FROM block_metrics WHERE $__timeFilter(timestamp)",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      }
+    },
+    {
+      "title": "Avg TPS (Period)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT AVG(tps) AS avg_tps FROM block_metrics WHERE $__timeFilter(timestamp)",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "decimals": 1 }
+      }
+    },
+    {
+      "title": "Max TPS (Period)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT MAX(tps) AS max_tps FROM block_metrics WHERE $__timeFilter(timestamp)",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "decimals": 1, "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 200 }] }
+        }
+      }
+    },
+    {
+      "title": "Avg Block Time",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT AVG(block_time) AS avg_block_time FROM block_metrics WHERE $__timeFilter(timestamp)",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 2 }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["ton", "blockchain", "anomaly"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "TON Blockchain Anomaly Detection",
+  "uid": "ton-anomaly-detection",
+  "version": 1
+}

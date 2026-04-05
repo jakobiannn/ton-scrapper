@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log"
 	"time"
+	"ton-scrapper/collector/models"
 
 	"github.com/segmentio/kafka-go"
-	"ton-scrapper/models"
 )
 
 // KafkaConsumer читает BlockMetrics из Kafka топика.

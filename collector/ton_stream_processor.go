@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log"
 	"time"
+	"ton-scrapper/collector/models"
 
 	"github.com/xssnick/tonutils-go/ton"
-	"ton-scrapper/models"
 )
 
 type TonStreamProcessor struct {
@@ -68,14 +68,20 @@ func (p *TonStreamProcessor) SubscribeToBlocks(ctx context.Context, output chan<
 					continue
 				}
 
+				// BlockTime вычисляется здесь — до этого момента process-методы не знают его.
+				// После установки вызываем Compute() чтобы пересчитать TPS с актуальным значением.
 				if !lastBlockTime.IsZero() {
 					metrics.BlockTime = metrics.Timestamp.Sub(lastBlockTime).Seconds()
 				}
 				lastBlockTime = metrics.Timestamp
+				metrics.Compute()
 
-				log.Printf("Блок %d | TX: %d | Адреса: %d | Шарды: %d | BlockTime: %.2fs",
+				log.Printf(
+					"Блок %d | TX: %d | Адреса: %d | Шарды: %d | TPS: %.1f | AvgVal: %.4f TON | TopAddrShare: %.2f | BlockTime: %.2fs",
 					metrics.SeqNo, metrics.TransactionCount, metrics.UniqueAddresses,
-					metrics.ShardCount, metrics.BlockTime)
+					metrics.ShardCount, metrics.TPS, metrics.AvgTxValue,
+					metrics.TopAddressShare, metrics.BlockTime,
+				)
 
 				select {
 				case output <- metrics:
@@ -90,6 +96,7 @@ func (p *TonStreamProcessor) SubscribeToBlocks(ctx context.Context, output chan<
 }
 
 // ProcessBlockFast — быстрый режим: только шарды, без анализа транзакций.
+// Tier 2 метрики не заполняются (IsDetailed=false).
 func (p *TonStreamProcessor) ProcessBlockFast(ctx context.Context, seqno uint32) (*models.BlockMetrics, error) {
 	masterBlock, err := p.api.LookupBlock(ctx, -1, -9223372036854775808, seqno)
 	if err != nil {
@@ -105,6 +112,7 @@ func (p *TonStreamProcessor) ProcessBlockFast(ctx context.Context, seqno uint32)
 		SeqNo:       seqno,
 		Timestamp:   time.Unix(int64(blockData.BlockInfo.GenUtime), 0),
 		ProcessedAt: time.Now(),
+		IsDetailed:  false,
 	}
 
 	shards, err := p.api.GetBlockShardsInfo(ctx, masterBlock)
@@ -112,13 +120,30 @@ func (p *TonStreamProcessor) ProcessBlockFast(ctx context.Context, seqno uint32)
 		log.Printf("Блок %d: не удалось получить шарды: %v", seqno, err)
 	} else {
 		metrics.ShardCount = len(shards)
+		// В fast-режиме используем количество шардов как прокси для числа TX-групп.
+		// Реальное TransactionCount будет 0 — это честнее чем фиктивное значение.
 		metrics.TransactionCount = len(shards)
 	}
+
+	// Compute() вызывается в SubscribeToBlocks после установки BlockTime.
+	// Для HistoricalLoader вызываем здесь — BlockTime будет 0, TPS не считается.
+	metrics.Compute()
 
 	return metrics, nil
 }
 
 // ProcessBlockDetailed — детальная обработка: реальное количество транзакций и уникальных адресов.
+//
+// Что считается из GetBlockTransactionsV2 (TransactionShortInfo: Account, LT, Hash):
+//   - TransactionCount, UniqueAddresses — точные значения
+//   - AddressReuseRatio = UniqueAddresses / TransactionCount
+//   - TopAddressShare — доля самого активного адреса по числу TX (не по объёму, т.к. значения недоступны)
+//
+// Что НЕ считается (требует полных данных TX через отдельный API-вызов, слишком медленно):
+//   - ExternalMsgCount, InternalMsgCount, ContractCallCount
+//   - ZeroValueTxCount, MaxTxValue, MinTxValue, TotalValue
+//
+// Для полных данных используй TonCenterProcessor.ProcessBlock.
 func (p *TonStreamProcessor) ProcessBlockDetailed(ctx context.Context, seqno uint32) (*models.BlockMetrics, error) {
 	masterBlock, err := p.api.LookupBlock(ctx, -1, -9223372036854775808, seqno)
 	if err != nil {
@@ -134,6 +159,7 @@ func (p *TonStreamProcessor) ProcessBlockDetailed(ctx context.Context, seqno uin
 		SeqNo:       seqno,
 		Timestamp:   time.Unix(int64(blockData.BlockInfo.GenUtime), 0),
 		ProcessedAt: time.Now(),
+		IsDetailed:  true,
 	}
 
 	// Собираем все блоки: masterchain + шарды
@@ -146,16 +172,18 @@ func (p *TonStreamProcessor) ProcessBlockDetailed(ctx context.Context, seqno uin
 		metrics.ShardCount = len(shards)
 	}
 
-	addressSet := make(map[string]struct{})
+	// addressCount: сколько раз адрес фигурирует в TX этого блока.
+	// Используется для TopAddressShare (по частоте, т.к. значения TX нам недоступны).
+	addressCount := make(map[string]int)
 	totalTxCount := 0
 
 	for _, block := range allBlocks {
 		var after *ton.TransactionID3
 
 		for {
-			// Передаём after только если он не nil (variadic параметр)
 			var txs []ton.TransactionShortInfo
 			var more bool
+
 			if after == nil {
 				txs, more, err = p.api.GetBlockTransactionsV2(ctx, block, 256)
 			} else {
@@ -169,7 +197,8 @@ func (p *TonStreamProcessor) ProcessBlockDetailed(ctx context.Context, seqno uin
 			for _, tx := range txs {
 				totalTxCount++
 				if len(tx.Account) > 0 {
-					addressSet[fmt.Sprintf("%x", tx.Account)] = struct{}{}
+					addr := fmt.Sprintf("%x", tx.Account)
+					addressCount[addr]++
 				}
 			}
 
@@ -177,14 +206,30 @@ func (p *TonStreamProcessor) ProcessBlockDetailed(ctx context.Context, seqno uin
 				break
 			}
 
-			// Курсор на последнюю транзакцию для следующей страницы
 			last := txs[len(txs)-1]
 			after = last.ID3()
 		}
 	}
 
 	metrics.TransactionCount = totalTxCount
-	metrics.UniqueAddresses = len(addressSet)
+	metrics.UniqueAddresses = len(addressCount)
+
+	// TopAddressShare: доля самого активного адреса по числу TX.
+	// Семантика отличается от TonCenterProcessor (там — по объёму переводов).
+	// Оба варианта полезны для детекции аномалий разного рода.
+	if totalTxCount > 0 {
+		var maxCount int
+		for _, count := range addressCount {
+			if count > maxCount {
+				maxCount = count
+			}
+		}
+		metrics.TopAddressShare = float64(maxCount) / float64(totalTxCount)
+	}
+
+	// Compute() вызывается в SubscribeToBlocks после установки BlockTime.
+	// Для HistoricalLoader — здесь (BlockTime=0, TPS будет 0).
+	metrics.Compute()
 
 	return metrics, nil
 }

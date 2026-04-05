@@ -2,10 +2,10 @@ package collector
 
 import (
 	"context"
+	"ton-scrapper/collector/models"
 
 	"github.com/xssnick/tonutils-go/tlb"
 	"github.com/xssnick/tonutils-go/ton"
-	"ton-scrapper/models"
 )
 
 // TonAPIClient абстрагирует TON blockchain API для тестируемости.
